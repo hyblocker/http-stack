@@ -13,28 +13,108 @@ namespace http::stack {
     Url::Url(const std::string& url)
         : href(url)
     {
+        constexpr size_t k_invalidSize = 0xFFFFFFFFFFFFFFFF;
+
         // Split by url parts
         std::string_view href_view(url);
-        protocol = href_view.substr(0, href_view.find("://") + 1);
+
+        size_t protocolIdx = k_invalidSize; // index of colon with http: or https: etc
+        size_t originIdx = k_invalidSize;   // first char of origin (domain)
+        size_t pathnameIdx = k_invalidSize; // first / of pathname if valid
+        size_t portIdx = k_invalidSize;     // first : of port if valid
+
+        // simple lexer to make sure a url is decoded properly
+        // index of works mostly but if a malformed string is inputted the app will crash and thats not good lol
         
+        enum class UrlParseState {
+            Start,
+            ProtocolColon,
+            ProtocolSlash1,
+            ProtocolSlash2,
+            Origin,
+            Port,
+            Pathname,
+            End,
+            Count
+        };
+
+        UrlParseState currentUrlParseState = UrlParseState::Start;
+        for (size_t i = 0; i < url.size(); i++) {
+            switch (url[i]) {
+            case ':':
+                if (currentUrlParseState == UrlParseState::Start) {
+                    currentUrlParseState = UrlParseState::ProtocolColon;
+                }
+                else if (currentUrlParseState == UrlParseState::Origin) {
+                    currentUrlParseState = UrlParseState::Port;
+                    portIdx = i;
+                }
+                break;
+            case '/':
+                if (currentUrlParseState == UrlParseState::ProtocolColon) {
+                    currentUrlParseState = UrlParseState::ProtocolSlash1;
+                    protocolIdx = i;
+                }
+                else if (currentUrlParseState == UrlParseState::ProtocolSlash1) {
+                    currentUrlParseState = UrlParseState::ProtocolSlash2;
+                }
+                else if (currentUrlParseState == UrlParseState::Origin || currentUrlParseState == UrlParseState::Port) {
+                    currentUrlParseState = UrlParseState::Pathname;
+                    pathnameIdx = i;
+                }
+                break;
+            default:
+                if (currentUrlParseState == UrlParseState::ProtocolSlash2) {
+                    currentUrlParseState = UrlParseState::Origin;
+                    originIdx = i;
+                }
+                break;
+            }
+        }
+
+        if (pathnameIdx == k_invalidSize) {
+            pathnameIdx = href_view.size();
+        }
+        size_t portIdxRead = portIdx == k_invalidSize ? pathnameIdx : portIdx + 1;
+        std::string szPort = url.substr(portIdxRead, pathnameIdx - portIdxRead);
+        if (portIdx == k_invalidSize) {
+            if (pathnameIdx == k_invalidSize) {
+                portIdx = href_view.size();
+            } else {
+                portIdx = pathnameIdx;
+            }
+        }
+        protocol = href_view.substr(0, protocolIdx);
+        origin = href_view.substr(originIdx, portIdx - originIdx);
+        pathname = href_view.substr(pathnameIdx);
+
         // determine port basd on protocol
         if (protocol == "http:") {
             port = k_PORT_HTTP;
-        } else if (protocol == "https:") {
+        }
+        else if (protocol == "https:") {
             port = k_PORT_HTTPS;
         }
 
-        // get port if defined in url
-        std::string_view szPort = href_view.substr(href_view.find("://") + 1);
-        szPort = szPort.substr(szPort.find(":") + 1);
-        szPort = szPort.substr(0, szPort.find("/"));
+        // if a port was specified use it
+        if (szPort.size() > 0) {
+            errno = 0; // Reset errno before the call
+            char* endptr = nullptr;
+            long result = strtol(szPort.c_str(), &endptr, 10);
 
-        pathname = href_view.substr(href_view.find("://") + 3);
-        pathname = pathname.substr(pathname.find("/"));
+            if (endptr != szPort.data() &&
+                static_cast<std::size_t>(endptr - szPort.data()) == szPort.size() &&
+                errno != ERANGE &&
+                result >= std::numeric_limits<int>::min() &&
+                result <= std::numeric_limits<int>::max()) {
+                // port is valid, override the default one
+                port = result;
+            }
+        }
 
-        origin = href_view.substr(href_view.find("://") + 3);
-        origin = origin.substr(0, origin.find("/"));
-        origin = origin.substr(0, origin.find(":"));
+        if (pathname.size() == 0) {
+            pathname = "/";
+        }
     }
     Url::~Url() {}
 

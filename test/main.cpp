@@ -10,7 +10,7 @@ int main() {
     http::stack::HttpStackError error = http::stack::init();
 
     http::stack::HttpClient client; // container for a native connection (socket)
-    http::stack::HttpRequest req = { { "https://google.com:6969/test?penis" }, http::stack::RequestType::REQUEST_GET };
+    http::stack::HttpRequest req = { { "http://google.com" }, http::stack::RequestType::REQUEST_GET };
     http::stack::HttpResponse resp = client.MakeRequest(req);
 
     SOCKET netSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
