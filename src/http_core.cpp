@@ -15,8 +15,7 @@ namespace http::stack {
     {
         constexpr size_t k_invalidSize = 0xFFFFFFFFFFFFFFFF;
 
-        // Split by url parts
-        std::string_view href_view(url);
+        std::string_view href_view(href);
 
         size_t protocolIdx = k_invalidSize; // index of colon with http: or https: etc
         size_t originIdx = k_invalidSize;   // first char of origin (domain)
@@ -130,7 +129,9 @@ namespace http::stack {
     
     HttpClient::~HttpClient() {
         int err = closesocket(m_hSocket);
-        // @TODO: Error handling
+        if (err != 0) {
+            // @TODO: Error handling
+        }
     }
 
     HttpResponse HttpClient::MakeRequest(HttpRequest request, uint32_t timeoutMs, HttpStackError* pError) {
@@ -144,21 +145,102 @@ namespace http::stack {
 
         HttpResponse resp = {};
 
-        int err = 0;
-#if WIN32
-        err = setsockopt(m_hSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
-#else
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = timeoutMs;
-        err = setsockopt(m_hSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-#endif
+        HttpStackError eErr = SetTimeout(timeoutMs);
         // @TODO: Error handling, check return results of setsockopt
+
+        int dwFamily = 0;
+        std::string szHostnameIp = ResolveDomainToIp(std::string(request.url.origin), dwFamily);
+        
+        // connect to domain
+        struct sockaddr_in serverAddress = {};
+        serverAddress.sin_family = dwFamily;
+        inet_pton(dwFamily, szHostnameIp.c_str(), &serverAddress.sin_addr.s_addr);
+        serverAddress.sin_port = htons(request.url.port);
+        int err = connect(m_hSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
+        // @TODO: Error handling, check return results of setsockopt
+
+        // get http method
+        const char* szHttpMethod = nullptr;
+        switch (request.requestType) {
+        default:
+        case RequestType::REQUEST_GET:
+            szHttpMethod = "GET";
+            break;
+        case RequestType::REQUEST_HEAD:
+            szHttpMethod = "HEAD";
+            break;
+        case RequestType::REQUEST_POST:
+            szHttpMethod = "POST";
+            break;
+        case RequestType::REQUEST_PUT:
+            szHttpMethod = "PUT";
+            break;
+        case RequestType::REQUEST_DELETE:
+            szHttpMethod = "DELETE";
+            break;
+        case RequestType::REQUEST_CONNECT:
+            szHttpMethod = "CONNECT";
+            break;
+        case RequestType::REQUEST_OPTIONS:
+            szHttpMethod = "OPTIONS";
+            break;
+        case RequestType::REQUEST_TRACE:
+            szHttpMethod = "TRACE";
+            break;
+        case RequestType::REQUEST_PATCH:
+            szHttpMethod = "PATCH";
+            break;
+        }
+
+        std::string szHttpGetRequest;
+        szHttpGetRequest.reserve(4096); // pre-allocate memory to minimise allocs
+        szHttpGetRequest.append(szHttpMethod);
+        szHttpGetRequest.append(" ");
+        szHttpGetRequest.append(request.url.pathname);
+        szHttpGetRequest.append(" HTTP/1.1\r\n");
+        
+        // @TODO: Maybe define this as a header?
+        szHttpGetRequest.append("Host: ");
+        szHttpGetRequest.append(request.url.origin);
+        szHttpGetRequest.append("\r\n");
+
+        // trail
+        szHttpGetRequest.append("\r\n");
+
+        // dummy receive
+        err = send(m_hSocket, szHttpGetRequest.c_str(), szHttpGetRequest.size(), 0);
+
+        // 4K buffer
+        size_t dwBufferSize = 4096;
+        char* dataBuffer = (char*)malloc(dwBufferSize);
+        memset(dataBuffer, 0, dwBufferSize);
+
+        err = recv(m_hSocket, dataBuffer, dwBufferSize, 0);
+        printf("%s\n", dataBuffer);
+
+        err = closesocket(m_hSocket);
 
         return resp;
     }
 
-    std::string HttpClient::ResolveDomainToIp(const std::string& szOrigin) {
+    HttpStackError HttpClient::SetTimeout(const uint32_t dwTimeoutMs) {
+
+        int err = 0;
+#if WIN32
+        err = setsockopt(m_hSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&dwTimeoutMs, sizeof(dwTimeoutMs));
+#else
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = dwTimeoutMs;
+        err = setsockopt(m_hSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+#endif
+
+        // @TODO: Error handling, check return results of setsockopt
+
+        return HttpStackError::OK;
+    }
+
+    std::string HttpClient::ResolveDomainToIp(const std::string& szOrigin, int& dwFamily) {
         struct addrinfo hints = {};
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
@@ -184,6 +266,7 @@ namespace http::stack {
 
                 if (inet_ntop(rp->ai_family, addr, szIp4str, dwIp4strSize) != NULL) {
                     if (result) {
+                        dwFamily = rp->ai_family;
                         freeaddrinfo(result);
                         result = nullptr;
                     }

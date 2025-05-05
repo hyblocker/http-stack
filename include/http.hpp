@@ -51,10 +51,10 @@ namespace http::stack {
         Url(const std::string& url);
         ~Url();
 
-        std::string_view origin; // domain
-        std::string_view protocol; // http: or https: usually
+        std::string origin; // domain
+        std::string protocol; // http: or https: usually
         uint16_t port = k_PORT_HTTP;
-        std::string_view pathname;
+        std::string pathname;
         std::string href; // actual url, everything else is a view into it
     };
 
@@ -88,10 +88,12 @@ namespace http::stack {
         ~HttpClient();
 
         HttpResponse MakeRequest(HttpRequest request, uint32_t timeoutMs = 30000, HttpStackError* pError = nullptr);
-        std::string ResolveDomainToIp(const std::string& szOrigin);
+        std::string ResolveDomainToIp(const std::string& szOrigin, int& dwFamily);
+        HttpStackError SetTimeout(const uint32_t dwTimeoutMs = 30000);
     private:
         NativeSocket m_hSocket = 0;
         IpVersion m_eIpVersion = IpVersion::IpV4;
+        uint32_t m_dwTimeout = 0;
     };
 
     // OS-specific subsystem stuff
