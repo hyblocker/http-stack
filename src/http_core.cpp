@@ -150,6 +150,7 @@ namespace http::stack {
 
         int dwFamily = 0;
         std::string szHostnameIp = ResolveDomainToIp(std::string(request.url.origin), dwFamily);
+        m_eIpVersion = dwFamily == AF_INET ? IpVersion::IpV4 : IpVersion::IpV6; // set IP version
         
         // connect to domain
         struct sockaddr_in serverAddress = {};
@@ -198,11 +199,13 @@ namespace http::stack {
         szHttpGetRequest.append(" ");
         szHttpGetRequest.append(request.url.pathname);
         szHttpGetRequest.append(" HTTP/1.1\r\n");
-        
+
         // @TODO: Maybe define this as a header?
         szHttpGetRequest.append("Host: ");
         szHttpGetRequest.append(request.url.origin);
         szHttpGetRequest.append("\r\n");
+
+        // @TODO: Push other headers
 
         // trail
         szHttpGetRequest.append("\r\n");
@@ -241,6 +244,7 @@ namespace http::stack {
     }
 
     std::string HttpClient::ResolveDomainToIp(const std::string& szOrigin, int& dwFamily) {
+        // @NOTE: Consider implementing DNS resolution manually?
         struct addrinfo hints = {};
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;

@@ -58,16 +58,16 @@ namespace http::stack {
         std::string href; // actual url, everything else is a view into it
     };
 
-    class Header {
-        std::string key;
-        std::string value;
-    };
-
     class HttpRequest {
     public:
         HttpRequest(Url url, RequestType eRequestType);
         Url url;
         RequestType requestType;
+
+        std::unordered_map<std::string, std::string> headers = {
+            // Default headers
+            { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0" }
+        };
     };
 
     class HttpResponse {
